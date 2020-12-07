@@ -48,10 +48,10 @@ void InitializeOutputs() {
 }
 
 void TimerISR();
-void TimerTick() {
+void TimerTick(int ms) {
 
    currTick += 1;
-
+   printf("%d ms: ",ms);
    TimerISR();
 }
 
@@ -69,7 +69,7 @@ typedef struct task {
 } task;
 
 task tasks[TASKS_COUNT];
-
+int  ordered_tasks[TASKS_COUNT] = {0,1,2};
 
 // Tasks parameters; don't modify this code 
 const unsigned char tasksNum = 3;
@@ -80,21 +80,31 @@ const unsigned long periodThreeLEDs = 200;
 
 // Task scheduler code. 
 void TimerISR() {
-    
+	/*
+   for(int j = 0; j < 3; j++){ 
+	printf("%ld ",tasks[ordered_tasks[j]].wcet);
+   }
+   printf("\n");
+   */
   unsigned char i;
-
+  unsigned long start = TimerRead();
   for (i = 0; i < tasksNum; ++i) { // Heart of the scheduler code
      
-     if (tasks[i].elapsedTime >= tasks[i].period) { // Ready
+     if (tasks[ordered_tasks[i]].elapsedTime >= tasks[ordered_tasks[i]].period) { // Ready
      
-        tasks[i].state = tasks[i].TickFct(tasks[i].state);
-
-        tasks[i].elapsedTime = 0;
+	unsigned long end = TimerRead();
+        tasks[ordered_tasks[i]].state = tasks[ordered_tasks[i]].TickFct(tasks[ordered_tasks[i]].state);
+	int jitter = end - start;
+	printf("Jitter %d: %d ",i,jitter);
+	if( jitter > tasks[ordered_tasks[i]].deadline){
+		printf(" Deadline Missed ");	
+	}
+        tasks[ordered_tasks[i]].elapsedTime = 0;
      }     
    
-     tasks[i].elapsedTime += tasksPeriodGCD;
+     tasks[ordered_tasks[i]].elapsedTime += tasksPeriodGCD;
   }
-   
+  printf("\n"); 
 
 }
 
@@ -187,15 +197,42 @@ int TickFct_CtrLED(int state) {
   return state;
 }
 
-void sorttasks()
+void sorttasks(int algorithm)
 {
 	// TODO: Implement this function so that tasks are sorted based on the algorithm variable (ALGORITHM_RMS or ALGORITHM_WCET)
+	if(algorithm == ALGORITHM_RMS){
+		//tasks with shorted deadlines get higher priority
+		int i,key,j;
+		for(int i = 1; i < TASKS_COUNT;i++){
+			key = tasks[ordered_tasks[i]].period;
+			j = i -1;
+			while( j >= 0 && tasks[ordered_tasks[j]].period > key){
+				ordered_tasks[j + 1] = ordered_tasks[j];
+				j = j -1;
+			}
+			ordered_tasks[j + 1] = i;
+		}
+	}
+	else{
+		int i,key,j;
+		for(int i = 1; i < TASKS_COUNT;i++){
+			key = tasks[ordered_tasks[i]].wcet;
+			j = i -1;
+			while( j >= 0 && tasks[ordered_tasks[j]].wcet > key){
+				ordered_tasks[j + 1] = ordered_tasks[j];
+				j = j -1;
+			}
+			ordered_tasks[j + 1] = i;
+		}
+	}
+
+		
 }
 int main() {
 
    // possible values for algorithm are: ALGORITHM_WCET and ALGORITHM_RMS
    algorithm = ALGORITHM_RMS;
-   
+   //algorithm = ALGORITHM_WCET; 
    unsigned char i = 0;
    tasks[i].state = BL_s1;
    tasks[i].period = periodBlinkLED;
@@ -220,11 +257,11 @@ int main() {
    tasks[i].wcet = 25;
    tasks[i].deadline = 27;
    
-   sorttasks();
+   sorttasks(algorithm);
    
    // Start the timer 
    TimerOn();
-   
+   int ms = 0; 
    unsigned long cur_time;
    
    while (currTick < ITERATIONS) 
@@ -233,8 +270,8 @@ int main() {
       cur_time = TimerRead();
       
     // This function calls the timer ISR    
-      TimerTick();   
-      
+      TimerTick(ms);   
+      ms+=tasksPeriodGCD; 
     // Wait for the timer so that tasksPeriodGCD (50ms) is passed
       while(TimerRead() - cur_time <  tasksPeriodGCD);
       
